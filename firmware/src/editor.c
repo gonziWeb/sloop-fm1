@@ -459,7 +459,7 @@ UI_SMALL static const uint8_t *ed_bk_obj(uint32_t id, uint32_t *len)   /* 0 = no
     }
     if (id >= 32u && id < 32u + SMP_USER_SLOTS) {
         const smp_user_hdr_t *h = (const smp_user_hdr_t *)smp_user_xip(id - 32u);
-        if (h->magic == SMP_USER_MAGIC && h->version == 1u && h->nz && h->nz <= 16u &&
+        if (id - 32u < SMP_USER_LIVE && h->magic == SMP_USER_MAGIC && h->version == 1u && h->nz && h->nz <= 16u &&
             h->data_len <= SMP_USER_SIZE - SMP_USER_DATA)
             *len = SMP_USER_DATA + h->data_len;
         return smp_user_xip(id - 32u);
@@ -805,7 +805,7 @@ UI_SMALL static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes b
     case ED_SMP_BEGIN:                                     /* slot -> slot, rc */
     case ED_SMP_ERASE: {
         uint32_t rc;
-        if (na < 1u || a[0] >= SMP_USER_SLOTS || !flash_ok)
+        if (na < 1u || a[0] >= SMP_USER_LIVE || !flash_ok)
             return;
         rc = ed_smp_erase(a[0], cmd == ED_SMP_ERASE) ? 1u : 0u;
         ed_smp_open[a[0]] = (uint8_t)(cmd == ED_SMP_BEGIN && !rc);
@@ -815,7 +815,7 @@ UI_SMALL static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes b
     }
     case ED_SMP_WRITE: {                                   /* slot, off (3 x 7 bit), pack7 data -> slot, off, rc */
         uint32_t off, len, rc = 0, took;
-        if (na < 5u || a[0] >= SMP_USER_SLOTS || !flash_ok)
+        if (na < 5u || a[0] >= SMP_USER_LIVE || !flash_ok)
             return;
         off = (uint32_t)a[1] | (uint32_t)a[2] << 7 | (uint32_t)a[3] << 14;
         len = ed_unpack7(a + 4, na - 4u, ed_smp_buf, 256u);
@@ -837,7 +837,7 @@ UI_SMALL static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes b
         break;
     }
     case ED_SMP_END:                                       /* slot, pack7 header -> slot, rc */
-        if (na < 2u || a[0] >= SMP_USER_SLOTS || !flash_ok)
+        if (na < 2u || a[0] >= SMP_USER_LIVE || !flash_ok)
             return;
         ed_b(a[0]);
         ed_b((uint32_t)ed_smp_end(a[0], a + 1, na - 1u));

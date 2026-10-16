@@ -24,7 +24,22 @@
  * (upreset.c); the working project (autosave, project.c): copy A 0x9F000, copy B 0xFE000 (the two sectors
  * left: A/B needs no two neighbours); the FM6 patch bank (fm6_bank.c, SLOOP 2.4): 0xE5000 / 0xE6000, the first
  * two sectors of the free 0xE5000..0xFBFFF after the update staging (FL_FM6, fm1_flash.h) */
+
+/* multi-song (FELUCCA_SONGS > 1): the four sections A..D of song 1 stay at 0x97000 (as every SLOOP has them);
+ * songs 2 and 3 take the flash of the user sample slot USR4 (0xE7000..0xFAFFF, then always empty): song n's
+ * sections at 0xE7000 + (n - 2) * 32 KiB, A/B each; the song list (the song in use and each song's order,
+ * project.c songs_t) at 0xF7000 / 0xF8000. song_bank (0..FELUCCA_SONGS-1, felucca.c) picks the bank the
+ * OBJ_PROJECT objects are read from and written to. */
+#ifndef FELUCCA_SONGS
+#define FELUCCA_SONGS 1
+#endif
+_Static_assert(FELUCCA_SONGS >= 1 && FELUCCA_SONGS <= 3, "songs 2 and 3 fit USR4's 80 KiB, with the song list");
+#if FELUCCA_SONGS > 1
+enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_AUTOSAVE = OBJ_UPRESET0 + 2, OBJ_FM6BANK, OBJ_SONGS,
+       OBJ_COUNT };
+#else
 enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_AUTOSAVE = OBJ_UPRESET0 + 2, OBJ_FM6BANK, OBJ_COUNT };
+#endif
 
 typedef struct {
     uint32_t magic;
@@ -60,6 +75,12 @@ UI_SMALL static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset
         return copy ? 0xFE000u : 0x9F000u;
     if (obj == OBJ_FM6BANK)
         return 0xE5000u + copy * ST_SECTOR;
+#if FELUCCA_SONGS > 1
+    if (obj == OBJ_SONGS)
+        return 0xF7000u + copy * ST_SECTOR;
+    if (obj >= OBJ_PROJECT0 && obj < OBJ_PROJECT0 + 4u && song_bank && song_bank < FELUCCA_SONGS)
+        return 0xE7000u + (song_bank - 1u) * 0x8000u + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;
+#endif
     if (obj >= OBJ_UPRESET0 && obj < OBJ_AUTOSAVE)
         return 0xDC000u + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;
     return 0x97000u + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;

@@ -1,0 +1,69 @@
+# Build SLOOP (multi-song) on GitHub's servers and publish the installer on GitHub Pages.
+# Settings > Pages > Source: "GitHub Actions" once; then every push to main builds and publishes.
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+env:
+  RELEASE: "2.7-3songs"
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python packages
+        run: pip install Pillow
+      - name: Libraries the JieLi toolchain may need
+        run: sudo apt-get update && (sudo apt-get install -y libtinfo5 libncurses5 || true)
+      - name: JieLi toolchain
+        run: sh tools/get_toolchain.sh "$HOME/.jieli"
+      - name: The three files of the AC79 SDK
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse --branch AC79NN_SDK_V1.2.1_2023-12-13 \
+            https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git "$HOME/fw-AC79_AIoT_SDK"
+          cd "$HOME/fw-AC79_AIoT_SDK" && git sparse-checkout set cpu/wl82/tools
+          ls -l cpu/wl82/tools/uboot.boot cpu/wl82/tools/cfg_tool.bin cpu/wl82/tools/cfg/eq_cfg_hw.bin
+      - name: Build the firmware
+        run: ./build.sh --release "$RELEASE"
+      - name: Multi-song host tests (must pass)
+        run: |
+          mkdir -p build/host
+          cc -O1 -Wall -Wno-unused-function -DFELUCCA_SONGS=3 -o build/host/storage_songs_test tests/storage_test.c
+          build/host/storage_songs_test
+          cc -O1 -w -Ibuild/gen -Ifirmware/src -Ifirmware/hal -Itests -o build/host/songs_test tests/songs_test.c -lm
+          build/host/songs_test
+      - name: The whole host suite (report only)
+        continue-on-error: true
+        env:
+          SOAK_MIN: "1"
+          SKIP_CPU_VALGRIND: "1"
+        run: sh tests/run_tests.sh
+      - name: The site (installer and editor)
+        run: python3 web/make_site.py "build/felucca-$RELEASE.fwsc" "$RELEASE" _site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sloop-${{ env.RELEASE }}-firmware
+          path: build/felucca-${{ env.RELEASE }}.fwsc
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

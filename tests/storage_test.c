@@ -7,6 +7,9 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifdef FELUCCA_SONGS
+static uint8_t song_bank;              /* multi-song build (felucca.c): the bank of the OBJ_PROJECT objects */
+#endif
 static uint8_t nor[0x100000];
 static int fail_after = -1;            /* torn-write injection: stop after N programs */
 
@@ -126,6 +129,9 @@ int main(void)
                 uint32_t a = st_sector(o, c);
                 int data = a >= 0x97000u && a + 4096u <= 0xA0000u, ups = a >= 0xDC000u && a + 4096u <= 0xE0000u;
                 int glob = a >= 0xFC000u && a + 4096u <= 0xFF000u, fm6 = a >= 0xE5000u && a + 4096u <= 0xE7000u;
+#if FELUCCA_SONGS > 1
+                fm6 |= a >= 0xE7000u && a + 4096u <= 0xFB000u;   /* (the song list in USR4's flash) */
+#endif
                 inside &= (data || ups || glob || fm6) && !(a & 0xFFFu);
                 for (o2 = 0; o2 < OBJ_COUNT; o2++)
                     for (c2 = 0; c2 < 2u; c2++)
@@ -165,6 +171,60 @@ int main(void)
         bad += check("2.6 erase: saved again", st_save(OBJ_PROJECT0 + 2u, a2, sizeof a2) == 0 &&
                      st_load(OBJ_PROJECT0 + 2u, got3, sizeof got3) == (int)sizeof a2 && !memcmp(got3, a2, sizeof a2));
     }
+#if FELUCCA_SONGS > 1
+    {   /* multi-song: each song's sections A..D in a bank of their own (song 1 where SLOOP has them, songs 2..3 in USR4's
+         * 80 KiB, 0xE7000..0xFAFFF), apart from each other and from every other object; a save in one song leaves
+         * the others as they were, and a torn save in a song keeps that song's last copy */
+        uint32_t b, i, c, b2, i2, c2, o, apart = 1, usr4 = 1;
+        static uint8_t pa[1000], pb[1000], gx[1000];
+        for (b = 0; b < FELUCCA_SONGS; b++)
+            for (i = 0; i < 4u; i++)
+                for (c = 0; c < 2u; c++) {
+                    uint32_t a;
+                    song_bank = (uint8_t)b;
+                    a = st_sector(OBJ_PROJECT0 + i, c);
+                    if (b)
+                        usr4 &= a >= 0xE7000u && a + 4096u <= 0xF7000u && !(a & 0xFFFu);
+                    else
+                        usr4 &= a >= 0x97000u && a + 4096u <= 0x9F000u;
+                    for (b2 = 0; b2 < FELUCCA_SONGS; b2++)
+                        for (i2 = 0; i2 < 4u; i2++)
+                            for (c2 = 0; c2 < 2u; c2++) {
+                                song_bank = (uint8_t)b2;
+                                if ((b2 != b || i2 != i || c2 != c) && st_sector(OBJ_PROJECT0 + i2, c2) == a)
+                                    apart = 0;
+                            }
+                    song_bank = (uint8_t)b;
+                    for (o = 0; o < OBJ_COUNT; o++)
+                        if (o < OBJ_PROJECT0 || o >= OBJ_PROJECT0 + 4u)
+                            if (st_sector(o, 0) == a || st_sector(o, 1) == a)
+                                apart = 0;
+                }
+        bad += check("songs: song 1 at 0x97000, songs 2..3 in USR4's flash", usr4);
+        bad += check("songs: every section of every song apart", apart);
+        bad += check("songs: the list after song 3, before 0xFB000",
+                     st_sector(OBJ_SONGS, 0) == 0xF7000u && st_sector(OBJ_SONGS, 1) == 0xF8000u);
+        memset(pa, 'a', sizeof pa);
+        memset(pb, 'b', sizeof pb);
+        song_bank = 0;
+        bad += check("songs: song 1 section A saved", st_save(OBJ_PROJECT0, pa, sizeof pa) == 0);
+        song_bank = 1;
+        bad += check("songs: song 2 section A empty at first", st_load(OBJ_PROJECT0, gx, sizeof gx) < 0);
+        bad += check("songs: song 2 section A saved", st_save(OBJ_PROJECT0, pb, sizeof pb) == 0);
+        song_bank = 0;
+        bad += check("songs: song 1 section A unchanged",
+                     st_load(OBJ_PROJECT0, gx, sizeof gx) == (int)sizeof pa && !memcmp(gx, pa, sizeof pa));
+        song_bank = 2;
+        bad += check("songs: song 3 section A still empty", st_load(OBJ_PROJECT0, gx, sizeof gx) < 0);
+        song_bank = 1;
+        fail_after = 2;
+        bad += check("songs: a torn save in song 2 fails", st_save(OBJ_PROJECT0, pa, sizeof pa) != 0);
+        fail_after = -1;
+        bad += check("songs: ... song 2 keeps its last copy",
+                     st_load(OBJ_PROJECT0, gx, sizeof gx) == (int)sizeof pb && !memcmp(gx, pb, sizeof pb));
+        song_bank = 0;
+    }
+#endif
     bad += side_tests();
     printf("%s\n", bad ? "STORAGE TEST FAILED" : "storage test passed");
     return bad != 0;

@@ -16,7 +16,8 @@
  *         9 fill while held, 10 fill the next bar, the last white key: tap tempo
  *   SAVE  keys 1..4 play section A..D (on the next bar; two or more tapped while SAVE stays held: a chain of
  *         them, looped, each for its pattern's bars), 5..8 store the loop into A..D, 13 loop / song,
- *         14 SONG REC (the order you play becomes the song), 16 the song page
+ *         14 SONG REC (the order you play becomes the song), 16 the song page; multi-song builds
+ *         (FELUCCA_SONGS): 9..11 songs 1..3 (stopped)
  * The keys' part runs in the audio ISR (seq.c layer_now: no lag, no lost press); the SEQ, SEL and
  * GLO keys come to the UI through seq.c lk_q. HOLD: REC held clears the track, SAVE held saves the
  * project (a ring fills; let go before and nothing happens). */
@@ -24,6 +25,9 @@ static const uint8_t LAYER_BTN[LY_COUNT] = {NB, B_FX, B_EDIT, B_ARP, B_SEQ, B_SC
 static const char *const LAYER_NAME[LY_COUNT] = {"", "punch", "erase", "roll", "steps", "key", "mix", "song"};
 static void section_store(uint32_t s);                  /* project.c */
 static void section_load(uint32_t s);
+#if FELUCCA_SONGS > 1
+static void song_switch(uint32_t n);                    /* project.c: SAVE + keys 9..11, songs 1..3 */
+#endif
 static uint8_t sec_armed;                               /* store over a used section: the key again within 3 s */
 static uint32_t sec_armed_ms;
 static uint8_t chain_tap[CHAIN_MAX], chain_taps;        /* the section keys tapped in this SAVE hold (the first
@@ -393,6 +397,10 @@ UI_SMALL static void layer_key(uint32_t layer, uint32_t k, uint32_t down)
                 section_store(s);
                 ui_say("SAVED ", b);
             }
+#if FELUCCA_SONGS > 1
+        } else if (w >= 8 && w < 8 + FELUCCA_SONGS) {
+            song_switch((uint32_t)w - 8u);              /* (stopped only: it says so) */
+#endif
         } else if (w == 12) {
             if (srec) {
                 ui_message("REC IS ON");
@@ -996,6 +1004,14 @@ UI_SMALL static void layer_screen_draw(void)
             tl[4 + i].fg = sec_armed == i + 1u ? C_BLACK : TE_G4;
             tl[4 + i].top = TE_DIM[i];
         }
+#if FELUCCA_SONGS > 1
+        for (i = 0; i < FELUCCA_SONGS; i++) {           /* songs 1..3 on keys 9..11, the one in use lit */
+            str_cpy(tl[8 + i].lab, "song 1", 8);
+            tl[8 + i].lab[5] = (char)('1' + i);
+            tl[8 + i].bg = song_bank == i ? C_WHITE : TE_G1;
+            tl[8 + i].fg = song_bank == i ? C_BLACK : TE_G4;
+        }
+#endif
         str_cpy(tl[12].lab, arrangement_enabled ? "song" : "loop", 8);
         tl[12].bg = arrangement_enabled ? C_WHITE : TE_G2;
         tl[12].fg = arrangement_enabled ? C_BLACK : C_WHITE;

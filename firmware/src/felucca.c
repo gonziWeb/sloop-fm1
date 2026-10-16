@@ -13,6 +13,13 @@
 #include "fm1_lcd_hw.h"
 #include "fm1_cpu1.h"      /* the second core (X0X): started in main.c, used by the render later */
 #include "felucca_tables.h"
+#ifndef FELUCCA_SONGS
+#define FELUCCA_SONGS 3          /* songs kept on the FM-1 (each four sections A..D and its order); 2..3 take the flash of the
+                                  * user sample slot USR4 (storage.c). 1: SLOOP as released, with USR4 */
+#endif
+#if FELUCCA_SONGS > 1
+static uint8_t song_bank;        /* the song in use, 0..FELUCCA_SONGS-1 (project.c songs_boot / song_switch) */
+#endif
 
 #include "libc.c"
 #include "lcd.c"

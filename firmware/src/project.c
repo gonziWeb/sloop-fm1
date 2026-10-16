@@ -577,6 +577,46 @@ UI_SMALL static void proj_fetch(uint32_t slot)
 #include "fm6_bank.c"                           /* the FM6 patch bank (eng_fm6.c PTCH B1..B27): staged in proj_tmp */
 #endif
 
+#if FELUCCA_FLASH && FELUCCA_ARRANGER && FELUCCA_SONGS > 1
+/* multi-song: the song list (storage.c OBJ_SONGS): the song in use and every song's order. The order of the song in
+ * use is `arrangement` (and the settings' copy, as ever); the list is brought up to date with each settings save
+ * and on a switch, in one A/B write, so the song in use and its order never part */
+#define SONGS_MAGIC 0x53474E53u                         /* "SNGS" */
+typedef struct {
+    uint32_t magic;
+    uint8_t cur, rsv[3];
+    arr_config_t arr[FELUCCA_SONGS];
+} songs_t;
+static songs_t songs, songs_saved;                      /* in RAM / as flash has it */
+UI_SMALL static void songs_write(void)                  /* (settings_save, song_switch) */
+{
+    songs.magic = SONGS_MAGIC;
+    songs.cur = song_bank;
+    songs.arr[song_bank] = arrangement;
+    if (!flash_ok || !memcmp(&songs, &songs_saved, sizeof songs))
+        return;                                         /* unchanged: no erase cycle */
+    if (st_save(OBJ_SONGS, &songs, sizeof songs) == 0)
+        songs_saved = songs;
+}
+UI_SMALL static void songs_boot(void)                   /* persist_boot: after the settings, before the sections */
+{
+    uint32_t i;
+    int n = st_load(OBJ_SONGS, &songs_saved, sizeof songs_saved);
+    if (n != (int)sizeof songs_saved || songs_saved.magic != SONGS_MAGIC || songs_saved.cur >= FELUCCA_SONGS) {
+        memset(&songs_saved, 0, sizeof songs_saved);    /* (no list yet: written with the next settings save) */
+        for (i = 0; i < FELUCCA_SONGS; i++)
+            arr_defaults(&songs.arr[i]);
+        songs.arr[0] = arrangement;                     /* the song SLOOP had: song 1 */
+        song_bank = 0;
+        return;
+    }
+    songs = songs_saved;
+    song_bank = songs.cur;
+    if (arr_valid(&songs.arr[song_bank], 15u))
+        arrangement = songs.arr[song_bank];             /* (the list is the one written last, with the switch) */
+}
+#endif
+
 static const char *const SEC_NAME[4] = {"A", "B", "C", "D"};   /* (2.7: the slots named as the song's sections) */
 UI_SMALL static void project_save(uint32_t slot)
 {
@@ -824,6 +864,9 @@ UI_SMALL static void persist_boot(void)                    /* before settings_in
                 panel = old;
         }
     }
+#if FELUCCA_ARRANGER && FELUCCA_SONGS > 1
+    songs_boot();                                  /* multi-song: the song in use (its bank) and its order */
+#endif
     {   /* projects: fill empty RAM slots from flash, so the slot list is right after power-on. A slot
          * still valid in RAM (a warm reset: an update, UPDATE MODE, a crash) may never have reached
          * flash (a live section stored while playing): marked to be written when quiet */
@@ -978,6 +1021,9 @@ UI_SMALL static void settings_save(void)
     persist_t p;
     if (!flash_ok)
         return;
+#if FELUCCA_ARRANGER && FELUCCA_SONGS > 1
+    songs_write();                                 /* multi-song: the list keeps the song's order too */
+#endif
     persist_fill(&p);
     {
         uint8_t mp[MIDI_PART];
@@ -1182,5 +1228,65 @@ UI_SMALL static void sections_flush(void)                        /* main loop */
     if (sec_dirty)
         ui_message("SAVE ERROR: RETRYING");
 }
+#if FELUCCA_FLASH && FELUCCA_SONGS > 1
+/* SAVE + key 9 / 10 / 11 (ui_layers.c): song 1 / 2 / 3. Stopped only. This song's sections and order go to flash
+ * first, then the list names the new song, then its sections A..D come from its own bank and the first of them
+ * becomes the loop (an empty song keeps the loop as it is: store it with SAVE + 5..8) */
+UI_SMALL static void song_switch(uint32_t n)
+{
+    static const char *const SN[3] = {"1", "2", "3"};
+    uint32_t i;
+    if (n >= FELUCCA_SONGS)
+        return;
+    if (song.playing || transport_req || arrangement_clock.running || srec) {
+        ui_message("STOP FIRST");
+        return;
+    }
+    if (n == song_bank) {
+        ui_say("SONG ", SN[n]);
+        return;
+    }
+    if (!flash_ok) {
+        ui_message("NO FLASH");
+        return;
+    }
+    sections_write();                                   /* (the song in use: into its own bank) */
+    if (sec_dirty) {
+        ui_message("SAVE ERROR");
+        return;
+    }
+    songs.magic = SONGS_MAGIC;
+    songs.arr[song_bank] = arrangement;
+    songs.cur = (uint8_t)n;
+    if (st_save(OBJ_SONGS, &songs, sizeof songs)) {
+        songs.cur = song_bank;
+        ui_message("SAVE ERROR");
+        return;
+    }
+    songs_saved = songs;
+    fm1_irq_off();
+    chain_n = 0;
+    live_req = -1;
+    live_sec = -1;
+    song_bank = (uint8_t)n;
+    for (i = 0; i < 4u; i++)
+        memset(&proj_slot[i], 0, sizeof proj_slot[i]);
+    fm1_irq_on();
+    for (i = 0; i < 4u; i++)
+        proj_fetch(i);
+    if (arr_valid(&songs.arr[n], 15u))
+        arrangement = songs.arr[n];
+    else
+        arr_defaults(&arrangement);
+    song_dirty = 1;                                     /* (the settings' copy of the order: when quiet) */
+    for (i = 0; i < 4u; i++)
+        if (proj_ok(&proj_slot[i])) {
+            section_load(i);
+            ui_say("SONG ", SN[n]);
+            return;
+        }
+    ui_say("NEW SONG ", SN[n]);
+}
+#endif
 #endif
 #endif /* PROJ_HOST */
