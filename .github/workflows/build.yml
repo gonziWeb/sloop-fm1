@@ -6,7 +6,7 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 concurrency:
@@ -51,6 +51,11 @@ jobs:
         run: sh tests/run_tests.sh
       - name: The site (installer and editor)
         run: python3 web/make_site.py "build/felucca-$RELEASE.fwsc" "$RELEASE" _site
+      - name: Keep the package on the firmware branch (for the emulator and downloads)
+        run: |
+          mkdir -p /tmp/fw && cp "build/felucca-$RELEASE.fwsc" /tmp/fw/ && cd /tmp/fw
+          git init -q -b firmware && git add . && git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "firmware ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" firmware
       - uses: actions/upload-artifact@v5
         with:
           name: sloop-${{ env.RELEASE }}-firmware
