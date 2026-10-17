@@ -18,8 +18,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Python packages
@@ -35,7 +35,7 @@ jobs:
           cd "$HOME/fw-AC79_AIoT_SDK" && git sparse-checkout set cpu/wl82/tools
           ls -l cpu/wl82/tools/uboot.boot cpu/wl82/tools/cfg_tool.bin cpu/wl82/tools/cfg/eq_cfg_hw.bin
       - name: Build the firmware
-        run: ./build.sh --release "$RELEASE"
+        run: sh build.sh --release "$RELEASE"
       - name: Multi-song host tests (must pass)
         run: |
           mkdir -p build/host
